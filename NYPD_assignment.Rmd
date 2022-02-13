@@ -1,0 +1,93 @@
+---
+title: "NYPD Shooting Incident Data Report"
+author: "Susumu Iwasaki"
+date: "2022/2/13"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+Sys.setlocale("LC_TIME", "English")
+
+```
+
+
+## 1. Collecting Data 
+First, I get data from NYPD shooting Incident data (Historic).
+
+```{r get_NYPD_data}
+
+raw_data <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+
+```
+## 2. Summary
+
+```{r summary}
+summary(raw_data)
+```
+
+
+## 3. Tidying data 
+
+I arranged two datasets; one is shooting incidents on the monthly basis, the other is incidents on the yearly basis. The reason is that the daily basis analysis is too fine to explain the trend.  
+
+```{r total_incident}
+total_trend <- raw_data %>% 
+  mutate(month = floor_date(mdy(OCCUR_DATE), unit="month")) %>% 
+  select(month, VIC_AGE_GROUP, VIC_SEX, VIC_RACE, BORO)
+
+year_trend <- raw_data %>% 
+  mutate(year = floor_date(mdy(OCCUR_DATE), unit="year")) %>% 
+  select(year, VIC_AGE_GROUP, VIC_SEX, VIC_RACE, BORO)
+```
+
+
+## 4. Historical trends concerning age group
+
+This analysis is planned for explaining whether the victim's age would be historically changed. Y plot is the monthly incident frequency in certain range of age: <18, 18-24, 25-44, 45-64, 65+, unknown. The smoothed line in each range is calculated by generalized additive mode smoothing.
+
+```{r}
+
+total_trend %>% 
+  group_by(month, VIC_AGE_GROUP) %>% 
+  mutate(count=n()) %>% 
+  select(month, VIC_AGE_GROUP, count) %>% 
+  ggplot(aes(x = month, y = count))+geom_smooth(aes(color=VIC_AGE_GROUP)) + geom_point(aes(color=VIC_AGE_GROUP)) + theme(legend.position = "bottom") + labs(title="Historical Trend of Shooting Incident at Victim's age in NYC", y=NULL)
+
+```
+
+### Analysis
+This graph shows that the number of shooting incidents had been gradually decreasing to 2018, but since then, it is rapidly increasing, especially the victims of 18-44 years old are skyrocketing.
+
+Note that the collected data might be geographically biased; 1) it is not reflected on the change of population structure on the age basis, so that since 2018, the population ratio of the 18-44 aged could be increasing, 2) gender or race balance might be changed per age group.  
+
+## 5. Historical trends per Borough
+
+This analysis is planned for explaining whether the monthly shooting frequency would be historically changed from the viewpoint of occurring place such as boroughs. 
+
+Y plot is the monthly incident frequency in each borough in NY; Bronx, Brooklyn, Manhattan, Queens, Staten Island. 
+
+The smoothed line in each range is calculated by generalized additive mode smoothing.
+
+```{r}
+
+
+total_trend %>% 
+  group_by(month, BORO) %>% 
+  mutate(count = n()) %>% 
+  select(month, BORO, count) %>% 
+  ggplot(aes(x = month, y = count))+geom_smooth(aes(color=BORO)) + geom_point(aes(color=BORO)) + theme(legend.position = "bottom") + labs(title="Historical Trend of Shooting Incident at each Borough in NYC", y=NULL)
+
+```
+
+### Analysis
+
+This graph also shows that gradually decreasing to 2018, but since then, it is rapidly increasing. 
+
+It also shows that there would be no difference of increase/decrease rate per borough.
+
+But please note that the data may be geographically biased; 1) gender or race balance might have been changed in each borough, 2) the structure of age group in each borough might have been changed. These factors may alter the historical trends in each borough.    
