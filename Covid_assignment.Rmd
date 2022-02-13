@@ -1,0 +1,250 @@
+---
+title: "COVID-19 in Japan and corelation between deaths rate and infection rate"
+author: "Susumu Iwasaki"
+date: "2022/2/13"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+## 1. Purpose
+ The purpose of this report is firstly to analyze the situation of COVID-19 in Japan, and more analyze the effect of full vaccination to COVID-19. 
+ 
+ Moreover, the purpose is to analyze the correlation between infection rate and death rate per population.
+
+ The source of the data is Johns Hopkins University, Coronavirus Resource Center (https://coronavirus.jhu.edu/map.html).
+
+## 2. Preparation
+
+### (1) Data collection
+
+ From the JHU site, I chose 2 time-series global covid-19 data.
+
+```{r get_jhu_data}
+
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+
+file_names <- 
+  c("time_series_covid19_confirmed_global.csv",
+    "time_series_covid19_deaths_global.csv")
+urls <- str_c(url_in,file_names)
+
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+
+
+```
+
+### (2) Tidying the data
+
+ I will tidy two datasets and join them into one with column of date, cases and deaths. 
+
+```{r tidy_global_data}
+global_cases <- global_cases %>%
+    pivot_longer(cols= -c('Province/State', 'Country/Region', Lat, Long), names_to = "date", values_to = "cases") %>%
+    select(-c(Lat, Long))
+    
+global_deaths <- global_deaths %>%
+    pivot_longer(cols= -c('Province/State', 'Country/Region', Lat, Long), names_to = "date", values_to = "deaths") %>%
+    select(-c(Lat, Long))
+
+global <- global_cases %>%
+    full_join(global_deaths) %>%
+    rename(Country_Region = 'Country/Region', Province_State = 'Province/State') %>%
+    mutate(date = mdy(date))
+    
+
+global <- global %>% filter(cases > 0)
+
+summary(global)
+```
+
+
+```{r}    
+global <- global %>%
+      unite("Combined_Key",
+      c(Province_State, Country_Region),
+      sep =", ",
+      na.rm =TRUE,
+      remove = FALSE)
+      
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+
+uid <- read_csv(uid_lookup_url) %>%
+    select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+    
+global <- global %>%
+    left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+    select(Province_State, Country_Region, date, cases, deaths, Population, Combined_Key)
+```
+
+## 3. Historical Trend in Japan
+
+### (1) Extracting data
+ 
+ From the global data, I will extract Japanese data and make its graph.
+
+```{r}
+japan_total <- global %>% filter(Country_Region == "Japan")
+```
+
+### (2) Cumulative trends
+```{r}
+japan_total %>% 
+  ggplot(aes(x=date, y=cases)) + 
+  geom_line(aes(color = "cases")) + 
+  geom_point(aes(color = "cases")) + 
+  geom_line(aes(y = deaths, color = "deaths")) + 
+  geom_point(aes(y = deaths, color = "deaths")) + 
+  scale_y_log10() + 
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) + 
+  labs(title = "Cumulative cases of COVID-19 in Japan", y = NULL)
+```
+
+#### Analysis
+
+ This graph shows that the cumulative sum of COVID-19 cases has been increasing at the same rate since May 2020.
+
+### (3) New cases trends
+
+ Is there any trend of new cases?
+
+ I will add new variables.
+
+```{r}
+japan_total <- japan_total %>%
+  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths))
+
+
+japan_total %>%
+  filter(cases > 0) %>%
+  filter(new_cases > 0) %>% 
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) + 
+  geom_point(aes(color = "new_cases")) + 
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "New cases trend of COVID-19 in Japan", y = NULL)
+
+```
+
+#### Analysis
+
+ This graph shows that number of new cases is fluctuating but clearly its number had been decreasing from September to December 2021.
+ 
+### (4) Additional thought - Vaccination effect -
+
+ What is the background of this down trend?
+ 
+ I will use global vaccination data from the same JHU site.
+ 
+ Then I will join this data into the above Japaneses data. 
+
+```{r} 
+global_vaccine <- read_csv(url("https://github.com/govex/COVID-19/raw/master/data_tables/vaccine_data/global_data/time_series_covid19_vaccine_global.csv"))
+
+summary(global_vaccine)
+
+
+japan_vaccine <- global_vaccine %>%
+  filter(Country_Region == "Japan") %>%
+  rename(date = 'Date')
+
+japan_total_vaccine <- japan_total %>% full_join(japan_vaccine, by="date")
+
+japan_total_vaccine %>%
+  filter(new_cases > 0) %>%
+  filter(People_fully_vaccinated > 0) %>% 
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = People_fully_vaccinated, color = "People_fully_vaccinated")) +
+  geom_point(aes(y = People_fully_vaccinated, color = "People_fully_vaccinated")) +
+  scale_y_log10() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "Effect of vaccine to new cases", y = NULL)
+```
+
+#### Analysis
+
+ This graph explains that the full vaccination will give effect to the decreasing trend from September to December 2021. 
+ 
+ But the skyrocketing number from December may be another background where the vaccine is not so valid for new mutated virus or other type of infection had occurred among non-vaccinated people such as young people who had not been eligible for vaccination. 
+ 
+ Note that data may be biased. This graph shows that infection rate and deaths rate is correlated, but from the view point of the age of the infected person, deaths may not be directly causal relationship with infection. The old aged people could die because of other fundamental diseases.  
+
+ 
+
+## 4. Correlation between deaths and infection cases
+
+ Common sense may explain: if the COVID-19 cases are found many times, many deaths cases caused by COVID-19 may also be found.
+
+ Is there any statistical evidence to prove the above gut feeling?
+
+ I will use global data of the JHU site. 
+ 
+ Then, I will add new 2 parameter "case_per_thou" and "deaths_per_thou" which function the numbers are standardized by the 1,000 population.
+
+```{r}
+
+global_country_total <- global %>%
+  group_by(Country_Region) %>%
+  summarize(deaths = max(deaths), cases = max(cases), population = max(Population), cases_per_thou = 1000 * cases / population,       deaths_per_thou = 1000 * deaths / population) %>%
+  filter(cases > 0, population > 0)
+
+summary(global_country_total)
+```
+
+### Prediction
+ Then, I assume that the standardized case and the standardized deaths case may be linearly correlated. 
+
+```{r}
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = global_country_total)
+
+summary(mod)
+
+global_country_total %>% slice_max(cases_per_thou)
+global_country_total %>% slice_min(cases_per_thou)
+
+x_grid <- seq(1,151)
+
+new_df <- tibble(cases_per_thou = x_grid)
+
+global_country_total %>% mutate(pred = predict(mod))
+
+global_total_pred <- global_country_total %>% mutate(pred = predict(mod))
+
+global_total_pred %>% ggplot()+
+  geom_point(aes(x=cases_per_thou, y=deaths_per_thou), color="blue")+
+  geom_point(aes(x=cases_per_thou, y=pred), color = "red")
+
+```
+
+#### Analysis
+
+ This graph depicts that the cases and deaths are linearly related, but there are several points where the number of deaths per population is much higher than linear predicted line. 
+
+ And it also shows that the above countries which the points show are relatively smaller the number of cases per population.
+
+ This data may show that at the above points (countries), vaccine had not been fully supplied.
+ 
+ Note that the data may be biased. Especially the small number of infection per population might suggest that the country adopted "zero-corona" policy or the country did not have enough inspection devices. So the number might be underestimated.
+
+## 5. Conclusion
+
+ This report shows historical trends of COVID-19 cases in Japan. 
+
+ It also suggests that full vaccination may be effective to the infection, but since December 2020, other factors may kick in Japan.
+
+ With regard to the correlation analysis, this report shows that the globally collected data explains that the number of infection cases and the number of deaths, which of both are standardized by the population of each country,  are linearly related.  
+
+ And it also suggests several exceptional countries where the its smaller infection rate is, the higher its deaths rate is.
